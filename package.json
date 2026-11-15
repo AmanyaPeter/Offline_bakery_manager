@@ -17,7 +17,7 @@
     "dexie": "4.0.11",
     "react": "18.3.1",
     "react-dom": "18.3.1",
-    "react-router-dom": "6.30.6",
+    "react-router-dom": "7.18.5",
     "zod": "4.6.7"
   },
   "devDependencies": {
@@ -30,6 +30,9 @@
     "prettier": "3.5.3",
     "typescript": "5.7.3",
     "vite": "6.4.6",
-    "vitest": "3.2.7"
+    "vitest": "5.1.0"
+  },
+  "engines": {
+    "node": ">=22.12.0"
   }
 }

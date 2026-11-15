@@ -42,7 +42,7 @@ Connect the production branch to automatic deployments. Use preview deployments 
 
 ## 4. First owner and invitation
 
-Open the deployed app online. Create an account and confirm its email. Sign in, create the bakery and enter your name. The transaction creates one owner, a central stock location and default price. Existing bakery users must join through a valid invitation; there is no public client-controlled role field.
+Open the deployed app online. Create an account and confirm its email. Sign in, create the bakery and enter your name. The transaction creates one owner, a central stock location and an unset default price. Enter the bakery’s actual price before recording the first sale. Existing bakery users must join through a valid invitation; there is no public client-controlled role field.
 
 In Owner administration configure ingredients, scales and default price. Invite managers/sellers by their exact confirmed email. Share their one-time code privately. Each seller gets an individual stock location when joining.
 

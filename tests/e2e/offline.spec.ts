@@ -19,6 +19,17 @@ test("installed shell saves bread offline and survives a reload", async ({
         const d = request.result;
         const t = d.transaction("meta", "readwrite");
         t.objectStore("meta").put({ key: "identity", value: i });
+        t.objectStore("meta").put({
+          key: "ingredients:" + i.bakery_id,
+          value: [
+            {
+              id: "44444444-4444-4444-8444-444444444444",
+              name: "Flour",
+              unit: "kg",
+              scale: 1000,
+            },
+          ],
+        });
         t.oncomplete = () => {
           d.close();
           resolve();
@@ -32,6 +43,10 @@ test("installed shell saves bread offline and survives a reload", async ({
   await expect(
     page.getByRole("heading", { name: "What would you like to record?" }),
   ).toBeVisible();
+  await page.screenshot({
+    path: "test-results/mobile-home.png",
+    fullPage: true,
+  });
   await context.setOffline(true);
   await page.getByRole("link", { name: "1 Baked Bread" }).click();
   await page.getByLabel("Number of loaves").fill("200");
@@ -56,6 +71,19 @@ test("installed shell saves bread offline and survives a reload", async ({
   await expect(
     page.locator("dl div").filter({ hasText: "Money collected" }),
   ).toContainText("UGX 10,000");
+  await page.getByRole("link", { name: "Home", exact: true }).click();
+  await page.getByRole("link", { name: "3 Bought Ingredients" }).click();
+  await page
+    .getByRole("combobox", { name: "Ingredient", exact: true })
+    .selectOption("44444444-4444-4444-8444-444444444444");
+  await page.getByLabel("Quantity in the ingredient’s unit").fill("1.5");
+  await page.getByLabel("Total paid for this item (UGX)").fill("3000");
+  await page.getByRole("button", { name: "Save record", exact: true }).click();
+  await expect(page.getByText("3 waiting for backup")).toBeVisible();
+  await page
+    .getByRole("link", { name: "Records, payments & corrections" })
+    .click();
+  await expect(page.getByText(/Flour: 1.5 kg/)).toBeVisible();
 });
 test("seller home keeps the requested action order", async ({ page }) => {
   await page.goto("/");

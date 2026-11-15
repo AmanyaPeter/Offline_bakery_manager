@@ -25,7 +25,7 @@ export const payloads = {
   payment: z.object({
     ...base,
     sale_id: id,
-    amount: qty,
+    amount: money.refine((n) => n > 0),
     method: z.enum(["cash", "mobile_money"]),
   }),
   bread_count: z.object({
@@ -47,7 +47,13 @@ export const payloads = {
     ...base,
     supplier: z.string().max(120).default(""),
     items: z
-      .array(z.object({ ingredient_id: id, quantity: qty, cost: money }))
+      .array(
+        z.object({
+          ingredient_id: id,
+          quantity: z.number().int().positive().max(1000000000),
+          cost: money,
+        }),
+      )
       .min(1)
       .max(30),
   }),
@@ -80,8 +86,9 @@ export const payloads = {
       "Packaging",
       "Other",
     ]),
-    amount: qty,
+    amount: money.refine((n) => n > 0),
   }),
+  resolution: z.object({ event_id: id, notes: z.string().min(3).max(500) }),
   reversal: z.object({ event_id: id, notes: z.string().min(3).max(500) }),
 };
 export type EventType = keyof typeof payloads;
@@ -132,6 +139,23 @@ export function validate(type: EventType, payload: unknown) {
       throw new Error("Choose cash or mobile money for a part payment.");
   }
   return p;
+}
+export function parseQuantity(text: string, scale: number): number {
+  const value = text.trim();
+  if (!/^-?\d+(?:\.\d{1,6})?$/.test(value))
+    throw new Error("Enter a quantity such as 1 or 1.5.");
+  const negative = value.startsWith("-");
+  const [whole, fraction = ""] = value.replace("-", "").split(".");
+  const denominator = 10n ** BigInt(fraction.length);
+  const numerator = BigInt(whole + fraction) * BigInt(scale);
+  if (numerator % denominator !== 0n)
+    throw new Error(
+      "This ingredient cannot be measured that finely. Use a larger amount.",
+    );
+  const units = Number(numerator / denominator) * (negative ? -1 : 1);
+  if (!Number.isSafeInteger(units) || Math.abs(units) > 1000000000)
+    throw new Error("That quantity is too large.");
+  return units;
 }
 export const ugx = (n: number) =>
   "UGX " + Math.round(n).toLocaleString("en-UG");
@@ -184,6 +208,11 @@ export function report(events: BusinessEvent[]) {
       a.event_id.localeCompare(b.event_id),
   );
   const active = activeFacts(ordered);
+  const resolved = new Set(
+    active
+      .filter((e) => e.event_type === "resolution")
+      .map((e) => e.payload.event_id),
+  );
   const stock: Record<string, number> = {},
     sales: Record<string, { total: number; paid: number; customer: string }> =
       {},
@@ -226,7 +255,7 @@ export function report(events: BusinessEvent[]) {
           )?.payload;
         if (t) {
           move(e.location_id, p.quantity);
-          if (p.quantity !== t.quantity)
+          if (p.quantity !== t.quantity && !resolved.has(e.event_id))
             discrepancies.push(
               "Transfer " +
                 p.transfer_id.slice(0, 8) +
@@ -264,7 +293,10 @@ export function report(events: BusinessEvent[]) {
         move(e.location_id, p.quantity);
         break;
       case "bread_count":
-        if ((stock[e.location_id] || 0) !== p.quantity)
+        if (
+          (stock[e.location_id] || 0) !== p.quantity &&
+          !resolved.has(e.event_id)
+        )
           discrepancies.push(
             "Bread count: expected " +
               (stock[e.location_id] || 0) +
@@ -283,7 +315,7 @@ export function report(events: BusinessEvent[]) {
         break;
       case "ingredient_count": {
         const s = ingredients[p.ingredient_id] || { quantity: 0, value: 0 };
-        if (s.quantity !== p.quantity)
+        if (s.quantity !== p.quantity && !resolved.has(e.event_id))
           discrepancies.push(
             "Ingredient count " +
               p.ingredient_id.slice(0, 8) +

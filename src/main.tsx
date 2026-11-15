@@ -12,6 +12,7 @@ import { Synchronizer } from "./sync";
 import {
   report,
   activeFacts,
+  parseQuantity,
   ugx,
   displayTime,
   businessDate,
@@ -37,12 +38,13 @@ const titles: Record<EventType, string> = {
   ingredient_count: "Count Ingredients Left",
   ingredient_adjustment: "Classify Ingredient Difference",
   expense: "Expenses",
+  resolution: "Resolve a Difference",
   reversal: "Correct a Record",
 };
 function errorText(e: unknown) {
   if (e instanceof Error) {
     if (e.name === "ZodError")
-      return "Check the form. Use whole numbers and fill in all required fields.";
+      return "Check the form. Check the quantities, amounts, and required fields.";
     return e.message;
   }
   return "Something went wrong. Your unsaved form is still here.";
@@ -396,6 +398,9 @@ function App() {
                   {!seller && (
                     <>
                       <Link to="/reversal">Correct a Record</Link>
+                      {identity.role === "owner" && (
+                        <Link to="/resolution">Resolve a Difference</Link>
+                      )}
                       <Link to="/bread_adjustment">Adjust Bread</Link>
                       <Link to="/ingredient_adjustment">
                         Classify Ingredient Difference
@@ -427,13 +432,41 @@ function App() {
                     </p>
                     <p>
                       {e.payload.quantity !== undefined
-                        ? e.payload.quantity + " loaves / scaled units "
+                        ? e.event_type.startsWith("ingredient_")
+                          ? String(
+                              e.payload.quantity /
+                                (ingredients.find(
+                                  (i) => i.id === e.payload.ingredient_id,
+                                )?.scale || 1),
+                            ) +
+                            " " +
+                            (ingredients.find(
+                              (i) => i.id === e.payload.ingredient_id,
+                            )?.unit || "") +
+                            " "
+                          : e.payload.quantity + " loaves "
                         : ""}
                       {e.event_type === "sale"
                         ? ugx(e.payload.quantity * e.payload.unit_price)
                         : ""}
                       {e.payload.amount ? ugx(e.payload.amount) : ""}
                     </p>
+                    {e.event_type === "purchase" && (
+                      <ul>
+                        {e.payload.items.map((item: any, n: number) => {
+                          const config = ingredients.find(
+                            (i) => i.id === item.ingredient_id,
+                          );
+                          return (
+                            <li key={n}>
+                              {config?.name || "Ingredient"}:{" "}
+                              {item.quantity / (config?.scale || 1)}{" "}
+                              {config?.unit} · {ugx(item.cost)}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    )}
                     {e.payload.notes && <p>{e.payload.notes}</p>}
                     <small>
                       {e.server_seq ? "Backed up" : "Waiting for backup"}
@@ -727,15 +760,16 @@ function RecordForm({
 }) {
   const [busy, setBusy] = useState(false),
     [lines, setLines] = useState(1),
-    [unitPrice, setUnitPrice] = useState(
+    [unitPrice, setUnitPrice] = useState<number | string>(
       () =>
         [...records]
           .reverse()
           .find(
             (e) => e.event_type === "sale" && e.user_id === identity.user_id,
-          )?.payload.unit_price || 0,
+          )?.payload.unit_price ?? "",
     ),
     [quantity, setQuantity] = useState(0);
+  const [formError, setFormError] = useState("");
   const reversed = new Set(
     records
       .filter((e) => e.event_type === "reversal")
@@ -783,7 +817,7 @@ function RecordForm({
         <option value="">Choose an ingredient</option>
         {ingredients.map((i) => (
           <option key={i.id} value={i.id}>
-            {i.name} ({i.unit}; {i.scale} units per {i.unit})
+            {i.name} ({i.unit})
           </option>
         ))}
       </select>
@@ -793,22 +827,34 @@ function RecordForm({
     e.preventDefault();
     if (busy) return;
     const f = new FormData(e.currentTarget);
-    const p: Record<string, any> = {};
-    for (const [k, v] of f.entries()) p[k] = v;
-    for (const k of ["quantity", "unit_price", "amount_received", "amount"])
-      if (k in p) p[k] = Number(p[k]);
-    if (type === "purchase")
-      p.items = Array.from({ length: lines }, (_, n) => ({
-        ingredient_id: f.get("ingredient_" + n),
-        quantity: Number(f.get("quantity_" + n)),
-        cost: Number(f.get("cost_" + n)),
-      }));
-    const date = String(f.get("effective"));
-    delete p.effective;
     setBusy(true);
+    setFormError("");
     try {
+      const p: Record<string, any> = {};
+      for (const [k, v] of f.entries()) p[k] = v;
+      for (const k of ["quantity", "unit_price", "amount_received", "amount"])
+        if (k in p) p[k] = Number(p[k]);
+      const measured = (field: string, ingredientId: string) => {
+        const config = ingredients.find((i) => i.id === ingredientId);
+        if (!config) throw new Error("Choose an ingredient first.");
+        return parseQuantity(String(f.get(field)), config.scale);
+      };
+      if (type === "purchase")
+        p.items = Array.from({ length: lines }, (_, n) => {
+          const ingredient_id = String(f.get("ingredient_" + n));
+          return {
+            ingredient_id,
+            quantity: measured("quantity_" + n, ingredient_id),
+            cost: Number(f.get("cost_" + n)),
+          };
+        });
+      if (["ingredient_count", "ingredient_adjustment"].includes(type))
+        p.quantity = measured("quantity", String(f.get("ingredient_id")));
+      const date = String(f.get("effective"));
+      delete p.effective;
       await save(type, p, new Date(date + ":00+03:00").toISOString());
-    } catch {
+    } catch (err) {
+      setFormError(errorText(err));
     } finally {
       setBusy(false);
     }
@@ -821,7 +867,7 @@ function RecordForm({
       )
     )
       void db.get<number>("price:" + identity.bakery_id).then((p) => {
-        if (p !== undefined) setUnitPrice(p);
+        if (typeof p === "number") setUnitPrice(p);
       });
   }, []);
   const localDate = new Date(Date.now() + 3 * 3600000)
@@ -833,6 +879,11 @@ function RecordForm({
         ‹ Back home
       </Link>
       <h1>{titles[type]}</h1>
+      {formError && (
+        <p className="error" role="alert">
+          {formError}
+        </p>
+      )}
       <form onSubmit={submit}>
         {[
           "production",
@@ -919,7 +970,7 @@ function RecordForm({
                 setUnitPrice(Number(e.target.value)),
             })}
             <output className="summary">
-              Total: {ugx(quantity * unitPrice)}
+              Total: {ugx(quantity * Number(unitPrice))}
             </output>
             {number("amount_received", "Money received now (UGX)")}
             <label>
@@ -971,14 +1022,19 @@ function RecordForm({
         {type === "purchase" && (
           <>
             <p>
-              Enter quantities in the configured scaled units. For example, 1.5
-              kg at scale 1000 is 1500 units.
+              Enter quantities in the unit shown next to the ingredient, such as
+              1.5 kg or 2 litres.
             </p>
             {Array.from({ length: lines }, (_, n) => (
               <fieldset key={n}>
                 <legend>Item {n + 1}</legend>
                 {ingredient("ingredient_" + n)}
-                {number("quantity_" + n, "Quantity (scaled units)", 1)}
+                {number(
+                  "quantity_" + n,
+                  "Quantity in the ingredient’s unit",
+                  0,
+                  { step: "any", inputMode: "decimal" },
+                )}
                 {number("cost_" + n, "Total paid for this item (UGX)")}
               </fieldset>
             ))}
@@ -1003,9 +1059,10 @@ function RecordForm({
             {number(
               "quantity",
               type === "ingredient_count"
-                ? "Quantity counted (scaled units)"
-                : "Change in scaled units (− for use or loss)",
+                ? "Quantity counted in the ingredient’s unit"
+                : "Change in ingredient quantity (− for use or loss)",
               type === "ingredient_count" ? 0 : -1000000000,
+              { step: "any", inputMode: "decimal" },
             )}
             {type === "ingredient_adjustment" && (
               <label>
@@ -1055,6 +1112,33 @@ function RecordForm({
             </p>
           </>
         )}
+        {type === "resolution" && (
+          <>
+            <label>
+              Observation to resolve
+              <select name="event_id" required>
+                <option value="">Choose a count or handover</option>
+                {records
+                  .filter((r) =>
+                    ["bread_count", "ingredient_count", "receipt"].includes(
+                      r.event_type,
+                    ),
+                  )
+                  .map((r) => (
+                    <option key={r.event_id} value={r.event_id}>
+                      {titles[r.event_type]} · {r.entity_id.slice(0, 8)} ·{" "}
+                      {displayTime(r.effective_at)}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <p>
+              Review the count, record any necessary stock adjustments, and
+              explain the decision. Both original observations stay in the audit
+              trail.
+            </p>
+          </>
+        )}
         {type === "reversal" && (
           <>
             <label>
@@ -1064,8 +1148,9 @@ function RecordForm({
                 {records
                   .filter(
                     (r) =>
-                      !["reversal", "receipt"].includes(r.event_type) &&
-                      !reversed.has(r.event_id),
+                      !["reversal", "receipt", "resolution"].includes(
+                        r.event_type,
+                      ) && !reversed.has(r.event_id),
                   )
                   .map((r) => (
                     <option key={r.event_id} value={r.event_id}>
@@ -1082,16 +1167,20 @@ function RecordForm({
           </>
         )}
         <label>
-          {["reversal", "bread_adjustment"].includes(type)
+          {["reversal", "bread_adjustment", "resolution"].includes(type)
             ? "Reason for correction"
             : "Notes (optional)"}
           <textarea
             name="notes"
             maxLength={500}
             minLength={
-              ["reversal", "bread_adjustment"].includes(type) ? 3 : undefined
+              ["reversal", "bread_adjustment", "resolution"].includes(type)
+                ? 3
+                : undefined
             }
-            required={["reversal", "bread_adjustment"].includes(type)}
+            required={["reversal", "bread_adjustment", "resolution"].includes(
+              type,
+            )}
           />
         </label>
         <label>

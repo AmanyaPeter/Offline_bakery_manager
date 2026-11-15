@@ -325,6 +325,11 @@ it("integrates three offline IndexedDB phones through real SQL synchronization",
       kind: "retail",
       customer: "Three phone customer",
     });
+    const laterPayment = await b.save(vendor, "payment", {
+      sale_id: sale.entity_id,
+      amount: 5000,
+      method: "cash",
+    });
     const purchase = await c.save(boss, "purchase", {
       items: [{ ingredient_id: ingredient, quantity: 50000, cost: 80000 }],
     });
@@ -336,9 +341,15 @@ it("integrates three offline IndexedDB phones through real SQL synchronization",
       kind: "wholesale",
     });
     const selected = new Set(
-      [production, allocation, receipt, sale, purchase, bakerySale].map(
-        (e) => e.event_id,
-      ),
+      [
+        production,
+        allocation,
+        receipt,
+        sale,
+        laterPayment,
+        purchase,
+        bakerySale,
+      ].map((e) => e.event_id),
     );
     const adapter = (i: Identity): Transport => ({
       push: async (es) => {
@@ -364,12 +375,12 @@ it("integrates three offline IndexedDB phones through real SQL synchronization",
     const facts = (await a.records.toArray()).filter((e) =>
       selected.has(e.event_id),
     );
-    expect(facts).toHaveLength(6);
+    expect(facts).toHaveLength(7);
     const totals = report(facts);
     expect(totals.stock[central]).toBe(80);
     expect(totals.stock[vendor.location_id]).toBe(70);
     expect(totals.revenue).toBe(100000);
-    expect(totals.debt).toBe(20000);
+    expect(totals.debt).toBe(15000);
     expect(totals.purchases).toBe(80000);
     expect(totals.discrepancies).toHaveLength(0);
     await sql.exec("reset role");
@@ -377,7 +388,7 @@ it("integrates three offline IndexedDB phones through real SQL synchronization",
       "select count(*)::integer as n from sync_events where event_id=any($1::uuid[])",
       [Array.from(selected)],
     );
-    expect(count.rows[0].n).toBe(6);
+    expect(count.rows[0].n).toBe(7);
   } finally {
     await Promise.all(phones.map((d) => d.delete()));
   }
@@ -436,4 +447,54 @@ it("requires reversal reasons, protects closed transfers, and rejects stale loca
       ])
     )[0].accepted,
   ).toBe(false);
+});
+
+it("allows only an owner to resolve a discrepancy without deleting the observation", async () => {
+  await as(owner);
+  const count = event("bread_count", { quantity: 123 });
+  expect((await push([count]))[0].accepted).toBe(true);
+  await as(seller);
+  expect(
+    (
+      await push([
+        event("resolution", {
+          event_id: count.event_id,
+          notes: "Not authorized",
+        }),
+      ])
+    )[0].accepted,
+  ).toBe(false);
+  await as(owner);
+  const resolution = event("resolution", {
+    event_id: count.event_id,
+    notes: "Count reviewed against late sales; no bread missing.",
+  });
+  expect((await push([resolution]))[0].accepted).toBe(true);
+  expect(
+    (
+      await push([
+        event("resolution", {
+          event_id: count.event_id,
+          notes: "Duplicate resolution",
+        }),
+      ])
+    )[0].accepted,
+  ).toBe(false);
+  await sql.exec("reset role");
+  expect(
+    (
+      await sql.query<any>(
+        "select resolution_event_id from sync_conflicts where event_id=$1",
+        [count.event_id],
+      )
+    ).rows[0].resolution_event_id,
+  ).toBe(resolution.event_id);
+  expect(
+    (
+      await sql.query<any>(
+        "select count(*)::int as n from sync_events where event_id=$1",
+        [count.event_id],
+      )
+    ).rows[0].n,
+  ).toBe(1);
 });

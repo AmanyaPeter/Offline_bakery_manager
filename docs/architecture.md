@@ -22,11 +22,11 @@ Use the requested stack. A small SPA avoids a separate application server, conta
 
 A UUID event has a separate UUID entity, device UUID, event type, schema version 1, payload, UTC client/effective timestamps. The server derives user, bakery and stock location from the authenticated profile. Device IDs belong to exactly one bakery/account. Server sequences determine pull order; effective timestamps order business estimates and observations. Never use effective timestamps as sync cursors.
 
-Every local save atomically inserts a readable record and pending event. Only accepted acknowledgments remove pending events. Downloaded canonical events replace their local copies by event UUID. Rejected records remain in the outbox and local database with a reason, excluded from operational totals. A corrected record uses a new UUID after review; accepted facts use reversals/adjustments.
+Every local save atomically inserts a readable record and pending event. Only accepted acknowledgments remove pending events. Downloaded canonical events replace their local copies by event UUID. Rejected records remain in the outbox and local database with a reason, excluded from operational totals. A corrected record uses a new UUID after review; accepted facts use reversals/adjustments. Owner discrepancy resolutions append a reason and retain the original observations.
 
 ## Stable cursor
 
-A sequence alone is insufficient: concurrent PostgreSQL transactions can commit out of sequence. Push and pull serialize per bakery using a transaction advisory lock before sequence allocation/read. A pull can never advance over a still-uncommitted same-bakery event. Sequence gaps from rollbacks or other bakeries are safe. Page size is 100; push batch size is 25. Each pull page and its cursor commit atomically on the phone. A maximum of 100 pages per run prevents a long catch-up from monopolizing a phone.
+A sequence alone is insufficient: concurrent PostgreSQL transactions can commit out of sequence. Push and pull serialize per bakery using a transaction advisory lock before sequence allocation/read. A pull can never advance over a still-uncommitted same-bakery event. Sequence gaps from rollbacks or other bakeries are safe. Page size is 100; push batch size is 25. Outgoing records are ordered by their references before batching: sales precede payments, handovers precede receipts, and original facts precede reversals/resolutions, regardless of UUID sort order. Each pull page and its cursor commit atomically on the phone. A maximum of 100 pages per run prevents a long catch-up from monopolizing a phone.
 
 ## Offline authentication
 

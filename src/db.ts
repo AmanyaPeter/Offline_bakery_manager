@@ -38,11 +38,15 @@ export class BakeryDB extends Dexie {
   ) {
     const p = validate(type, payload);
     const now = new Date().toISOString();
-    let device = await this.get<string>("device:" + identity.user_id);
-    if (!device) {
-      device = crypto.randomUUID();
-      await this.set("device:" + identity.user_id, device);
-    }
+    const device = await this.transaction("rw", this.meta, async () => {
+      const key = "device:" + identity.user_id;
+      let value = await this.get<string>(key);
+      if (!value) {
+        value = crypto.randomUUID();
+        await this.set(key, value);
+      }
+      return value;
+    });
     const event: BusinessEvent = {
       event_id: crypto.randomUUID(),
       entity_id: crypto.randomUUID(),
@@ -95,7 +99,8 @@ export class BakeryDB extends Dexie {
           !rejected.has(e.event_id) &&
           (identity.role !== "seller" ||
             allowed.has(e.event_id) ||
-            (e.event_type === "reversal" && allowed.has(e.payload.event_id))),
+            (["reversal", "resolution"].includes(e.event_type) &&
+              allowed.has(e.payload.event_id))),
       )
       .sort(
         (a, b) =>

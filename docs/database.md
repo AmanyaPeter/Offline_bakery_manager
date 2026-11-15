@@ -10,7 +10,7 @@ UUID entity keys support offline entry. UGX columns are bigint, bread counts int
 
 ## RPCs
 
-- `create_bakery(bakery_name, person_name)`: authenticated unassigned user becomes the first owner. Creates central stock and price settings transactionally.
+- `create_bakery(bakery_name, person_name)`: authenticated unassigned user becomes the first owner. Creates central stock and initially unset price settings transactionally.
 - `invite_user(invite_email, invite_role)`: owner-only, returns a random token once; stores only its SHA-256 hash. Roles are manager or seller, expiry seven days.
 - `accept_invitation(invite_token, person_name)`: email-matched, unused, unexpired token; creates seller location if required. Tokens are row-locked while accepting.
 - `owner_config(action, body)`: add ingredient, set default price, rename location, revoke a device, change non-owner role. Historical locations remain; reconcile stock before changing roles. Owners cannot remove or demote themselves through this RPC.
@@ -23,6 +23,8 @@ Schema version is exactly 1. Introduce migrations and compatible clients before 
 ## Transfer and count semantics
 
 Sending moves bread out of the source into transit. Receiving adds only the observed quantity to destination stock. Unique `transfer_confirmations.transfer_id` prevents the same handover moving stock twice. Different quantities mark a dispute and create a conflict; no automatic loss is fabricated. Cancellation is an audited reversal of an unconfirmed handover. Confirmed transfers require explicit adjustments with reasons, never record replacement.
+
+Owners resolve reviewed count/receipt discrepancies using an append-only `resolution` event with a reason. The conflict links to that event, and both original observations remain available. Resolution does not manufacture a stock movement; enter any needed adjustment separately.
 
 A physical count is an observation; it does not overwrite the stock ledger. Reports compare counts with effective-time facts. Late arrivals recompute the comparison. Different simultaneous counts stay separate. Negative ledger stock is displayed as a discrepancy instead of rejecting legitimate offline sales based on incomplete stock information.
 

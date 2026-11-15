@@ -1,3 +1,5 @@
+import { parseQuantity } from "../src/domain";
+import { orderPending } from "../src/sync";
 import "fake-indexeddb/auto";
 import { describe, it, expect, afterEach } from "vitest";
 import { BakeryDB } from "../src/db";
@@ -416,4 +418,53 @@ describe("business calculations", () => {
       }),
     ).toThrow();
   });
+});
+
+it("orders queued payments and reversals after the facts they reference", async () => {
+  const d = phone();
+  const sale = await d.save(seller, "sale", {
+    quantity: 10,
+    unit_price: 2000,
+    amount_received: 0,
+    method: "credit",
+    kind: "wholesale",
+    customer: "Jane",
+  });
+  const payment = await d.save(seller, "payment", {
+    sale_id: sale.entity_id,
+    amount: 5000,
+    method: "cash",
+  });
+  const reversal = await d.save(manager, "reversal", {
+    event_id: payment.event_id,
+    notes: "Wrong payment",
+  });
+  const items = await d.outbox.toArray();
+  const ordered = orderPending([
+    items.find((x) => x.event_id === reversal.event_id)!,
+    items.find((x) => x.event_id === payment.event_id)!,
+    items.find((x) => x.event_id === sale.event_id)!,
+  ]);
+  expect(ordered.map((x) => x.event_id)).toEqual([
+    sale.event_id,
+    payment.event_id,
+    reversal.event_id,
+  ]);
+});
+it("initializes a single account device identity under concurrent local saves", async () => {
+  const d = phone();
+  const [a, b] = await Promise.all([
+    d.save(manager, "production", { quantity: 1 }),
+    d.save(manager, "production", { quantity: 2 }),
+  ]);
+  expect(a.device_id).toBe(b.device_id);
+  expect(await d.records.count()).toBe(2);
+});
+
+it("converts familiar ingredient quantities to exact scaled integers", () => {
+  expect(parseQuantity("1.5", 1000)).toBe(1500);
+  expect(parseQuantity("-0.25", 1000)).toBe(-250);
+  expect(parseQuantity("0.333", 1000)).toBe(333);
+  expect(() => parseQuantity("1.5", 1)).toThrow("finely");
+  expect(() => parseQuantity("1.0001", 1000)).toThrow("finely");
 });

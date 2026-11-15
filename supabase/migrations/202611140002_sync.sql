@@ -29,7 +29,7 @@ begin
  if e->>'location_id' is not null and (e->>'location_id')::uuid<>loc then raise exception 'Your stock location changed. Ask the owner to review this pending record.';end if;
  if (select count(*) from sync_events where user_id=me.user_id and received_at>now()-interval '1 hour')>=2000 then raise exception 'Too many records this hour. Try backup later.';end if;
  if me.role='seller' and t not in ('sale','payment','receipt','return','bread_count','damage') then raise exception 'Your current role cannot perform this action.';end if;
- if t not in ('production','transfer','receipt','return','sale','payment','bread_count','damage','bread_adjustment','purchase','ingredient_count','ingredient_adjustment','expense','reversal') then raise exception 'Unknown record type.';end if;
+ if t not in ('production','transfer','receipt','return','sale','payment','bread_count','damage','bread_adjustment','purchase','ingredient_count','ingredient_adjustment','expense','reversal','resolution') then raise exception 'Unknown record type.';end if;
  if (e->>'effective_at')::timestamptz>now()+interval '1 day' or (e->>'effective_at')::timestamptz<'2020-01-01' then raise exception 'Check the record date and device clock.';end if;
  if (e->>'effective_at') is null or (e->>'client_created_at') is null then raise exception 'Record timestamps are required.';end if;
  if length(coalesce(p->>'notes',''))>500 then raise exception 'Notes are too long.';end if;
@@ -89,9 +89,15 @@ begin
  if t='ingredient_count' then insert into ingredient_stock_counts values(entity,me.bakery_id,eid,ing,event_integer(p,'quantity',0,1000000000));
  else insert into ingredient_adjustments values(entity,me.bakery_id,eid,ing,event_integer(p,'quantity',-1000000000,1000000000),p->>'classification');end if;
  when 'expense' then insert into expenses values(entity,me.bakery_id,eid,p->>'category',event_integer(p,'amount',1,1000000000));
+ when 'resolution' then
+ if me.role<>'owner' then raise exception 'Only the owner can resolve a discrepancy.';end if;
+ select * into prior from sync_events where event_id=(p->>'event_id')::uuid and bakery_id=me.bakery_id;
+ if prior.event_id is null or prior.event_type not in ('receipt','bread_count','ingredient_count') or length(trim(coalesce(p->>'notes','')))<3 then raise exception 'Choose an observation and explain the decision.';end if;
+ if exists(select 1 from sync_events where bakery_id=me.bakery_id and event_type='resolution' and event_id<>eid and payload->>'event_id'=prior.event_id::text) then raise exception 'This observation was already resolved.';end if;
+ update sync_conflicts set resolution_event_id=eid where bakery_id=me.bakery_id and event_id=prior.event_id;
  when 'reversal' then
  select * into prior from sync_events where event_id=(p->>'event_id')::uuid and bakery_id=me.bakery_id;
- if prior.event_id is null or prior.event_type in ('reversal','receipt') or length(trim(coalesce(p->>'notes','')))<3 then raise exception 'This record cannot be reversed. Use an adjustment with a reason.';end if;
+ if prior.event_id is null or prior.event_type in ('reversal','receipt','resolution') or length(trim(coalesce(p->>'notes','')))<3 then raise exception 'This record cannot be reversed. Use an adjustment with a reason.';end if;
  if exists(select 1 from sync_events where bakery_id=me.bakery_id and event_type='reversal' and event_id<>eid and payload->>'event_id'=prior.event_id::text) then raise exception 'Already reversed.';end if;
  if prior.event_type in ('transfer','return') and exists(select 1 from transfer_confirmations where transfer_id=prior.entity_id) then raise exception 'Confirmed transfers need stock adjustments at both locations.';end if;
  if prior.event_type='sale' and exists(select 1 from payments pay where sale_id=prior.entity_id and event_id<>prior.event_id and not exists(select 1 from sync_events r where r.event_type='reversal' and r.bakery_id=me.bakery_id and r.payload->>'event_id'=pay.event_id::text)) then raise exception 'Reverse later payments before reversing this sale.';end if;
@@ -112,8 +118,8 @@ create function public.pull_events(after_seq bigint default 0) returns jsonb lan
  perform pg_advisory_xact_lock(hashtextextended(me.bakery_id::text,0));
  select * into me from profiles where user_id=auth.uid();
  select coalesce(jsonb_agg(to_jsonb(e) order by server_seq),'[]'),coalesce(max(server_seq),after_seq) into rows,cursor from
- (select * from sync_events where bakery_id=me.bakery_id and server_seq>after_seq and (me.role in ('owner','manager') or user_id=me.user_id or payload->>'destination'=me.location_id::text or (event_type='reversal' and exists(select 1 from sync_events original where original.event_id::text=sync_events.payload->>'event_id' and (original.user_id=me.user_id or original.payload->>'destination'=me.location_id::text)))) order by server_seq limit 100)e;
- select exists(select 1 from sync_events where bakery_id=me.bakery_id and server_seq>cursor and (me.role in ('owner','manager') or user_id=me.user_id or payload->>'destination'=me.location_id::text or (event_type='reversal' and exists(select 1 from sync_events original where original.event_id::text=sync_events.payload->>'event_id' and (original.user_id=me.user_id or original.payload->>'destination'=me.location_id::text))))) into more;
+ (select * from sync_events where bakery_id=me.bakery_id and server_seq>after_seq and (me.role in ('owner','manager') or user_id=me.user_id or payload->>'destination'=me.location_id::text or (event_type in ('reversal','resolution') and exists(select 1 from sync_events original where original.event_id::text=sync_events.payload->>'event_id' and (original.user_id=me.user_id or original.payload->>'destination'=me.location_id::text)))) order by server_seq limit 100)e;
+ select exists(select 1 from sync_events where bakery_id=me.bakery_id and server_seq>cursor and (me.role in ('owner','manager') or user_id=me.user_id or payload->>'destination'=me.location_id::text or (event_type in ('reversal','resolution') and exists(select 1 from sync_events original where original.event_id::text=sync_events.payload->>'event_id' and (original.user_id=me.user_id or original.payload->>'destination'=me.location_id::text))))) into more;
  return jsonb_build_object('events',rows,'next_cursor',cursor,'has_more',more);
 end$$;
 -- Explicit allowlist: no helper/definer function is callable merely because it exists.

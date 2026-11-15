@@ -1,6 +1,6 @@
 # Business and costing rules
 
-All amounts are whole UGX. A sale is at most UGX 1,000,000,000. No floating-point decimal amounts are stored. Cost apportionment multiplies and divides integer BigInts, rounding to the nearest UGX (half up). Ingredient scale quantities are whole units: scale 1000 and unit kg means 1500 units represent 1.5 kg.
+All amounts are whole UGX. A sale is at most UGX 1,000,000,000. No floating-point decimal amounts are stored. Cost apportionment multiplies and divides integer BigInts, rounding to the nearest UGX (half up). Ingredient scale quantities are whole units: scale 1000 and unit kg means 1500 units represent 1.5 kg. Users enter familiar quantities such as 1.5 kg; the app converts decimal text exactly to scaled integers and rejects finer precision than the ingredient supports.
 
 ## Bread and money
 

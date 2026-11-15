@@ -1,9 +1,7 @@
-import type { BakeryDB } from "./db";
+import type { BakeryDB, Outgoing } from "./db";
 import type { BusinessEvent, Identity } from "./domain";
 export interface Transport {
-  push(
-    events: BusinessEvent[],
-  ): Promise<
+  push(events: BusinessEvent[]): Promise<
     {
       event_id: string;
       accepted: boolean;
@@ -11,13 +9,49 @@ export interface Transport {
       server_seq?: number;
     }[]
   >;
-  pull(
-    cursor: number,
-  ): Promise<{
+  pull(cursor: number): Promise<{
     events: BusinessEvent[];
     next_cursor: number;
     has_more: boolean;
   }>;
+}
+export function orderPending(items: Outgoing[]): Outgoing[] {
+  const byId = new Map<string, Outgoing>();
+  for (const item of items) {
+    byId.set(item.event.event_id, item);
+    byId.set(item.event.entity_id, item);
+  }
+  const complete = new Set<string>(),
+    visiting = new Set<string>(),
+    result: Outgoing[] = [];
+  function visit(item: Outgoing) {
+    if (complete.has(item.event_id)) return;
+    if (visiting.has(item.event_id))
+      throw new Error(
+        "Pending records contain a circular reference. Ask the owner to review the recovery file.",
+      );
+    visiting.add(item.event_id);
+    const e = item.event;
+    const dependency =
+      e.event_type === "payment"
+        ? e.payload.sale_id
+        : e.event_type === "receipt"
+          ? e.payload.transfer_id
+          : ["reversal", "resolution"].includes(e.event_type)
+            ? e.payload.event_id
+            : undefined;
+    if (dependency && byId.has(dependency)) visit(byId.get(dependency)!);
+    visiting.delete(item.event_id);
+    complete.add(item.event_id);
+    result.push(item);
+  }
+  for (const item of [...items].sort(
+    (a, b) =>
+      a.event.client_created_at.localeCompare(b.event.client_created_at) ||
+      a.event_id.localeCompare(b.event_id),
+  ))
+    visit(item);
+  return result;
 }
 export class Synchronizer {
   private running = false;
@@ -31,12 +65,14 @@ export class Synchronizer {
     if (this.running || (!force && Date.now() < this.nextAttempt)) return;
     this.running = true;
     try {
-      const pending = (
-        await this.db.outbox.where("status").equals("pending").toArray()
-      ).filter(
-        (x) =>
-          x.event.user_id === identity.user_id &&
-          x.event.bakery_id === identity.bakery_id,
+      const pending = orderPending(
+        (
+          await this.db.outbox.where("status").equals("pending").toArray()
+        ).filter(
+          (x) =>
+            x.event.user_id === identity.user_id &&
+            x.event.bakery_id === identity.bakery_id,
+        ),
       );
       for (let i = 0; i < pending.length; i += 25) {
         const batch = pending.slice(i, i + 25);
@@ -78,6 +114,7 @@ export class Synchronizer {
         cursor = page.next_cursor;
         more = page.has_more;
       }
+      await this.db.meta.delete("syncError:" + identity.user_id);
       this.failures = 0;
       this.nextAttempt = 0;
       await this.db.set(
@@ -88,6 +125,11 @@ export class Synchronizer {
       this.failures++;
       this.nextAttempt =
         Date.now() + Math.min(300000, 1000 * 2 ** Math.min(this.failures, 9));
+      await this.db.set("syncError:" + identity.user_id, {
+        message: e instanceof Error ? e.message : "Backup failed",
+        nextAttempt: this.nextAttempt,
+        failures: this.failures,
+      });
       throw e;
     } finally {
       this.running = false;
