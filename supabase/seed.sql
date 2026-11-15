@@ -1,0 +1,10 @@
+-- DEVELOPMENT ONLY. Supabase config disables automatic seeding.
+-- First create a test bakery/user through the app, then run as the local DB admin.
+-- Replace the UUID with that test bakery's actual ID. No production Auth user is fabricated.
+-- insert into public.ingredients(bakery_id,name,unit,scale) values
+-- ('YOUR-TEST-BAKERY-UUID','Flour','kg',1000),
+-- ('YOUR-TEST-BAKERY-UUID','Sugar','kg',1000),
+-- ('YOUR-TEST-BAKERY-UUID','Yeast','kg',1000),
+-- ('YOUR-TEST-BAKERY-UUID','Cooking oil','litre',1000),
+-- ('YOUR-TEST-BAKERY-UUID','Salt','kg',1000),
+-- ('YOUR-TEST-BAKERY-UUID','Packaging','piece',1);

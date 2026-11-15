@@ -1,0 +1,633 @@
+You are a senior full-stack engineer, database architect, offline-first application engineer, security engineer, and UX designer.
+
+Build and finish a production-oriented bakery management application named “Bakery Manager” for a small bakery in Uganda.
+
+You are working directly in my local repository. Inspect all existing files before changing anything. Preserve useful existing work, but you may redesign the architecture when it materially improves reliability, maintainability, deployment, or development speed.
+
+I want the finished repository pushed to GitHub and deployable through a Git-connected hosting platform without requiring me to run deployment commands manually.
+
+PRIMARY OUTCOME
+
+Produce a complete, tested, mobile-first, offline-capable bakery management application using:
+
+- GitHub as the source repository
+- Supabase for PostgreSQL, authentication, row-level security, database functions, and optional Edge Functions
+- A Git-connected frontend host such as Vercel, Netlify, or Cloudflare Pages
+- Environment variables for all Supabase configuration
+- A Progressive Web App installable on Android
+- IndexedDB for offline business records and pending synchronization
+- Free-tier-compatible services where practical
+
+Prefer the simplest reliable architecture. Do not preserve the current architecture merely because it already exists.
+
+RECOMMENDED STACK
+
+Use:
+
+- React
+- TypeScript
+- Vite
+- React Router
+- Supabase JavaScript client
+- Supabase PostgreSQL
+- Supabase Auth
+- Dexie for IndexedDB
+- Zod for shared validation
+- Vitest
+- Playwright for essential user flows
+- A lightweight CSS approach such as CSS modules or a small global design system
+
+Avoid heavy component libraries, complex state-management frameworks, unnecessary charting libraries, and excessive dependencies.
+
+If you select a different stack, document why it provides a material advantage.
+
+BUSINESS CONTEXT
+
+The bakery is in Uganda and produces one type of bread.
+
+Production is irregular, usually 100–500 loaves on a production day.
+
+Bread is sold:
+
+1. Directly from the bakery
+2. Through individual sellers
+3. Through wholesale sales, including customer credit
+
+Multiple Android phones may remain offline and record transactions independently.
+
+Currency is Ugandan Shillings. Store all monetary values as integer UGX amounts. Never use floating-point currency.
+
+Store unambiguous UTC timestamps. Display business dates and times using Africa/Kampala.
+
+USER EXPERIENCE
+
+The main users may be older and have limited technical confidence.
+
+Requirements:
+
+- Large text
+- Large touch targets
+- High contrast
+- Very simple language
+- Portrait-first layout
+- Minimal typing
+- Minimal navigation
+- No unnecessary animation
+- Plain-language errors
+- Confirmation only after a local transaction commits
+- Visible offline status
+- Visible pending-backup count
+- Clear indication when all records are backed up
+- Ability to correct mistakes through auditable reversals or adjustments
+- Fast operation on affordable TECNO Android phones
+
+Seller home actions, in this order:
+
+1. Sold Bread
+2. Received Bread
+3. Bread Left
+4. Return Bread
+5. My Records
+
+Manager home actions, in this order:
+
+1. Baked Bread
+2. Give Bread to Seller
+3. Bought Ingredients
+4. Count Ingredients Left
+5. Sold Bread
+6. Expenses
+7. Reports
+
+Administrative features must be in a separate owner-only area.
+
+ROLES
+
+Implement:
+
+Owner / Administrator:
+- Full access
+- Manage users, invitations, roles, devices, ingredients, prices, and locations
+- View all records and reports
+- Resolve discrepancies
+- Review audit records
+
+Manager:
+- Record production
+- Record purchases
+- Allocate bread
+- Confirm returns
+- Record bakery sales
+- Count stock
+- Record expenses
+- View authorized reports
+
+Seller:
+- Confirm bread received
+- Record personal sales
+- Return bread
+- Count remaining bread
+- View personal records and balances
+
+Enforce authorization with Supabase Row Level Security and database functions, not only in the frontend.
+
+Never trust bakery ID, role, seller ID, stock location, totals, or ownership supplied by the browser without server/database verification.
+
+ONBOARDING
+
+Implement a safe initial setup:
+
+- A bakery owner creates an account
+- The owner creates or joins a bakery through a controlled onboarding flow
+- The owner invites managers and sellers
+- Each authenticated user belongs to one bakery
+- A seller is bound to their own seller stock location
+- Users cannot access another bakery
+- Role changes take effect at the server
+- Offline actions based on stale permissions may remain locally pending, but the server must reject them safely during synchronization
+- Rejected records must remain visible and must not be silently deleted
+
+OFFLINE-FIRST REQUIREMENTS
+
+The application must remain usable after installation when there is no internet.
+
+Use IndexedDB through Dexie for:
+
+- Local business records
+- Pending outgoing events
+- Downloaded events
+- Synchronization cursor
+- Cached non-sensitive configuration
+- Cached last-known permissions
+- Device identity
+- Sync error and rejection information
+
+Every local business action must atomically create:
+
+1. Its local readable record
+2. Its append-only outgoing synchronization event
+
+Do not show “Saved” until the IndexedDB transaction commits.
+
+Never use localStorage for critical business data.
+
+Request persistent browser storage and clearly document that the browser or operating system may still remove local data.
+
+Do not claim a record is backed up until Supabase acknowledges it.
+
+SYNC ARCHITECTURE
+
+Implement an append-only event synchronization design suitable for multiple offline devices.
+
+Each event must have:
+
+- event_id UUID
+- entity_id UUID
+- device_id UUID
+- event_type
+- schema_version
+- payload
+- client_created_at
+- effective_at
+- server sequence assigned by PostgreSQL
+- authenticated user and bakery derived by the server
+
+Implement idempotent push and cursor-based pull.
+
+Prefer Supabase PostgreSQL RPC functions for atomic push and pull operations. Use an Edge Function only if database RPC cannot safely provide the required authentication, validation, or response behavior.
+
+Push behavior:
+
+- Send small batches
+- Validate each event
+- Derive auth user and bakery on the server
+- Check role permissions
+- Deduplicate by event_id
+- Process accepted events transactionally
+- Return an acknowledgment for each event
+- Preserve rejected events locally
+- Never remove a pending event merely because an upload was attempted
+
+Pull behavior:
+
+- Pull events after a stable server sequence cursor
+- Sort by server sequence
+- Paginate
+- Return the next safe cursor
+- Make retries safe
+- Atomically apply pulled events and advance the local cursor
+
+Do not use client timestamps as the event cursor.
+
+Do not use last-write-wins for financial and inventory facts.
+
+Trigger synchronization:
+
+- At application startup
+- On resume
+- When connectivity returns
+- Periodically while open
+- When the user presses Sync
+
+Use bounded exponential backoff.
+
+INVENTORY MODEL
+
+Represent the bakery and each seller as separate bread stock locations.
+
+Support:
+
+- Production
+- Central bakery stock
+- Seller stock
+- Bread allocations
+- Seller receipt confirmations
+- Returns
+- Damaged bread
+- Physical bread counts
+- Inventory discrepancies
+- Auditable adjustments and reversals
+
+A bread allocation is a transfer, not a sale and not revenue.
+
+Every transfer needs:
+
+- UUID
+- Human-readable reference
+- Source location
+- Destination location
+- Quantity sent
+- Quantity received
+- Status: pending, confirmed, disputed, cancelled
+- Manager and seller events
+- Timestamps
+
+Prevent duplicate stock movements when manager and seller record the same handover.
+
+If quantities differ, flag the discrepancy. Never overwrite either observation.
+
+SALES
+
+Record:
+
+- Number of loaves
+- Actual integer UGX unit price
+- Calculated total
+- Retail or wholesale
+- Stock location
+- Seller
+- Effective date/time
+- Optional customer
+- Payment status
+- Amount received
+- Cash, mobile money, or credit
+- Optional notes
+
+Prefill the last-used price but allow changes.
+
+A seller may only sell from their assigned location.
+
+Support full payment, partial payment, credit, and later payments.
+
+Prevent duplicate counting between individual transactions and aggregate summaries.
+
+INGREDIENTS
+
+Ingredients are configured once with a measurement unit and integer precision scale.
+
+Examples:
+
+- Flour
+- Sugar
+- Yeast
+- Cooking oil
+- Salt
+- Packaging
+
+Purchases may contain multiple items.
+
+Record:
+
+- Ingredient
+- Scaled integer quantity
+- Unit
+- Total integer UGX paid
+- Purchase date
+- Optional supplier
+- Optional notes
+
+Use physical stock counts rather than requiring ingredient usage for every production batch.
+
+Reconciliation:
+
+Previous stock
++ purchases
++ incoming adjustments
+- current stock
+- known nonproduction outflows
+
+Do not automatically classify every difference as bread-production consumption.
+
+Allow classification as:
+
+- Estimated production use
+- Wastage
+- Spoilage
+- Measurement discrepancy
+- Other adjustment
+
+Use weighted-average costing initially.
+
+Do not claim exact per-batch ingredient consumption when stock counts span several production batches.
+
+EXPENSES AND PROFITABILITY
+
+Support:
+
+- Transport
+- Electricity
+- Water
+- Fuel
+- Wages
+- Repairs
+- Packaging-related costs
+- Other operating expenses
+
+Do not double-count ingredient purchases as operating expenses.
+
+Reports must distinguish:
+
+- Revenue
+- Cash collected
+- Customer debt
+- Ingredient purchases
+- Estimated ingredient consumption
+- Production costs
+- Estimated cost of bread sold
+- Operating expenses
+- Gross profit
+- Estimated net profit
+- Unsold inventory
+- Bread discrepancies
+
+Clearly label estimates.
+
+DATABASE
+
+Create normalized Supabase PostgreSQL migrations for at least:
+
+- bakeries
+- profiles or bakery_users
+- devices
+- ingredients
+- purchase_batches
+- purchase_items
+- ingredient_stock_counts
+- ingredient_adjustments
+- production_batches
+- stock_locations
+- bread_transfers
+- transfer_confirmations
+- bread_stock_counts
+- bread_adjustments
+- customers
+- sales
+- payments
+- expenses
+- expense_categories
+- sync_events
+- sync_conflicts
+- audit_log
+
+Requirements:
+
+- UUID primary keys for offline-created entities
+- Integer UGX fields
+- Integer bread quantities
+- Scaled integer ingredient quantities
+- Foreign keys
+- Check constraints
+- Unique constraints
+- Useful indexes
+- Immutable or tightly controlled event records
+- Row Level Security on every user-accessible table
+- Safe database functions with fixed search paths
+- No client-controlled role escalation
+- No exposed service-role key in the frontend
+
+Include migrations and seed data separately.
+
+Create demo seed data only for local/development use.
+
+SECURITY
+
+Implement:
+
+- Supabase Auth
+- Row Level Security
+- Secure invitation and role assignment
+- Database validation
+- Audit logging
+- Rate limiting where practical
+- Safe session renewal
+- No service-role key in frontend code
+- No secrets committed to Git
+- No passwords stored in IndexedDB
+- No long-lived custom bearer tokens stored in plaintext
+- Safe error messages
+- Protection against cross-bakery access
+
+Document offline-authentication limitations, device theft, cached permissions, and permission revocation.
+
+REPORTS
+
+Implement simple mobile reports:
+
+- Today’s sales
+- Sales by seller
+- Bread produced
+- Bread allocated
+- Bread remaining
+- Bread wasted
+- Money collected
+- Customer credit outstanding
+- Ingredient purchases
+- Expenses
+- Estimated profitability
+- Stock discrepancies
+- Pending synchronization records
+
+Use UGX formatting throughout.
+
+TESTS
+
+Implement automated tests for:
+
+- Offline saving
+- IndexedDB restart persistence
+- Atomic record and outbox creation
+- Duplicate event upload
+- Interrupted synchronization
+- Cursor pagination
+- Concurrent sales
+- Production
+- Bread allocation
+- Seller receipt confirmation
+- Returns
+- Conflicting stock counts
+- Late-arriving events
+- Ingredient reconciliation
+- Profit calculations
+- Partial customer payments
+- RLS and permission enforcement
+- Cross-bakery isolation
+- Migration correctness
+
+Add an integration test simulating three devices:
+
+- Phone A records production and allocations
+- Phone B records seller sales while offline
+- Phone C records ingredient purchases and bakery sales while offline
+
+After synchronization, accepted transactions must appear exactly once. Stock must reconcile or produce explicit discrepancy flags.
+
+DEPLOYMENT
+
+Prepare the project for GitHub-based deployment.
+
+The repository must contain:
+
+- Complete source code
+- Supabase SQL migrations
+- Supabase configuration
+- `.env.example`
+- PWA manifest and service worker
+- Tests
+- README
+- Architecture documentation
+- Database documentation
+- Security documentation
+- Backup and recovery documentation
+- Deployment guide
+
+The deployment guide must explain:
+
+1. Creating a Supabase project
+2. Obtaining the public project URL and anonymous/publishable key
+3. Applying migrations using Supabase CLI or the SQL editor
+4. Creating the first owner
+5. Configuring allowed authentication URLs
+6. Adding environment variables to the frontend host
+7. Connecting GitHub to Vercel, Netlify, or Cloudflare Pages
+8. Build command and output directory
+9. Deploying from GitHub
+10. Installing the PWA on Android
+11. Backups and point-in-time recovery limitations
+12. Device replacement and unsynchronized-record recovery
+
+Use frontend environment variables such as:
+
+VITE_SUPABASE_URL=
+VITE_SUPABASE_ANON_KEY=
+
+Never place the Supabase service-role key in Vite variables.
+
+GITHUB
+
+Initialize Git if needed.
+
+Before publishing:
+
+- Check `.gitignore`
+- Confirm secrets are excluded
+- Run tests
+- Run type checking
+- Run the production build
+- Review changed files
+- Commit in clear, logical commits
+
+If GitHub CLI is authenticated, create or connect the GitHub repository and push it.
+
+Do not force-push or overwrite an existing remote.
+
+If authentication or repository ownership requires my input, stop and give me the exact single action I must take.
+
+IMPLEMENTATION METHOD
+
+Work in stable phases:
+
+Phase 1:
+- Inspect repository
+- Document the selected architecture
+- Establish frontend, Supabase, and offline data contracts
+- Create migrations and RLS design
+
+Phase 2:
+- Authentication and onboarding
+- Mobile navigation
+- IndexedDB offline layer
+- PWA installation and caching
+
+Phase 3:
+- Sync push and pull
+- Idempotency
+- Cursor pagination
+- Permission rejection handling
+- Three-device sync test
+
+Phase 4:
+- Production, transfers, receipts, returns, sales, and stock counts
+
+Phase 5:
+- Ingredient purchasing and reconciliation
+- Expenses, payments, customer credit, and reports
+
+Phase 6:
+- Security review
+- Performance review
+- Deployment documentation
+- GitHub preparation
+- Full test suite
+
+After each phase:
+
+1. Explain what was implemented
+2. Run relevant tests
+3. Fix failures before continuing
+4. Update documentation
+5. Report remaining risks
+
+Do not stop after scaffolding.
+
+Continue until the application is usable and deployment-ready, unless blocked by external authentication or a decision only I can make.
+
+ENGINEERING PRIORITIES
+
+Use this order:
+
+1. Data integrity
+2. Offline reliability
+3. Simplicity for older users
+4. Correct multi-device synchronization
+5. Security and bakery isolation
+6. Accurate inventory and financial calculations
+7. Performance on inexpensive Android phones
+8. Simple GitHub deployment
+9. Maintainability
+10. Visual appearance
+
+Do not silently invent financial behavior.
+
+Choose the simplest safe interpretation of ambiguity and document it.
+
+START NOW
+
+First:
+
+1. Inspect the repository and Git status
+2. Identify reusable and incomplete existing code
+3. Propose the concrete architecture and project structure
+4. Explain whether you will preserve or replace the existing frontend
+5. Implement Phase 1
+6. Run its tests
+7. Continue through the remaining phases when stable

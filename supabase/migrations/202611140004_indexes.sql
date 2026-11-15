@@ -1,0 +1,14 @@
+begin;
+create index profiles_bakery on public.profiles(bakery_id);
+create index devices_bakery on public.devices(bakery_id,user_id);
+create index sync_events_user_received on public.sync_events(user_id,received_at);
+create index sync_events_reversal_target on public.sync_events(bakery_id,(payload->>'event_id')) where event_type='reversal';
+create index transfers_destination_status on public.bread_transfers(bakery_id,destination,status);
+create index sales_bakery_seller on public.sales(bakery_id,seller_id);
+create index payments_sale on public.payments(sale_id);
+create index purchase_items_batch on public.purchase_items(batch_id);
+create index ingredient_counts_ingredient on public.ingredient_stock_counts(bakery_id,ingredient_id);
+create index bread_counts_location on public.bread_stock_counts(bakery_id,location_id);
+create index conflicts_bakery on public.sync_conflicts(bakery_id,created_at);
+create index audit_bakery_time on public.audit_log(bakery_id,created_at desc);
+commit;
