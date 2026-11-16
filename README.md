@@ -43,3 +43,4 @@ Playwright automatically uses `/usr/bin/brave-browser` if present. Otherwise ins
 - [Validation and release limits](docs/validation.md)
 
 The repository includes automated SQL tests using embedded PostgreSQL. A final staging test on hosted Supabase with real email delivery, multiple phones and authentication configuration remains necessary before business use. Never replace unsynchronized paper records until this is verified for the bakery.
+# Offline_bakery_manager
