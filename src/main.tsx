@@ -41,6 +41,21 @@ const titles: Record<EventType, string> = {
   resolution: "Resolve a Difference",
   reversal: "Correct a Record",
 };
+const actionIconPaths: Record<string, string> = {
+  sale: "M5 8h14l1 12H4L5 8zm4 1V6a3 3 0 0 1 6 0v3",
+  production:
+    "M4 11a8 8 0 0 1 16 0c0 2-1 3-2 4v4H6v-4c-1-1-2-2-2-4zm5-1 1-2m3 2 1-2",
+  transfer: "M3 7h17m-4-4 4 4-4 4M4 17h16m-12-4-4 4 4 4",
+  receipt: "M4 12v7h16v-7M12 3v11m-4-4 4 4 4-4",
+  balance: "M4 5h16v14H4zM4 11h16m-11 4h6",
+  return: "M9 6 4 11l5 5m-5-5h11a5 5 0 0 1 5 5v3",
+  records: "M6 3h9l3 3v15H6zM9 10h6m-6 4h6m-6 4h4",
+  purchase: "M4 7h16v13H4zM8 7V4h8v3m-7 5h6",
+  ingredient_count: "M9 4H5v17h14V4h-4m-6-1h6v4H9zm-1 11 3 3 5-6",
+  expense: "M5 4h14v16l-3-2-4 2-4-2-3 2zm4 5h6m-6 4h6",
+  reports: "M4 4v16h16m-12-4v-4m5 4V8m5 8V5",
+};
+
 function errorText(e: unknown) {
   if (e instanceof Error) {
     if (e.name === "ZodError")
@@ -291,18 +306,27 @@ function App() {
           <>
             {path === "home" && (
               <>
-                <p className="eyebrow">
-                  {seller ? "MY BREAD" : "BAKERY WORK"} · Kampala time
-                </p>
                 <h1>What would you like to record?</h1>
-                <div className="summary">
-                  <span>Bread at your location</span>
-                  <strong>
-                    {totals.stock[identity.location_id] || 0}{" "}
-                    <small>loaves</small>
-                  </strong>
-                  <span>Includes records waiting for backup</span>
-                </div>
+                <section className="workbench" aria-label="Bakery balances">
+                  <div className="stock-card">
+                    <span>Bread at your location</span>
+                    <strong>
+                      {totals.stock[identity.location_id] || 0}{" "}
+                      <small>loaves</small>
+                    </strong>
+                    <Link to="/balance">View bread stock</Link>
+                  </div>
+                  <dl className="money-card">
+                    <div>
+                      <dt>Money collected</dt>
+                      <dd>{ugx(totals.cash)}</dd>
+                    </div>
+                    <div>
+                      <dt>Customer credit outstanding</dt>
+                      <dd>{ugx(totals.debt)}</dd>
+                    </div>
+                  </dl>
+                </section>
                 <nav className="actions">
                   {(seller
                     ? [
@@ -313,17 +337,28 @@ function App() {
                         ["records", "My Records"],
                       ]
                     : [
+                        ["sale", "Sold Bread"],
                         ["production", "Baked Bread"],
                         ["transfer", "Give Bread to Seller"],
                         ["purchase", "Bought Ingredients"],
                         ["ingredient_count", "Count Ingredients Left"],
-                        ["sale", "Sold Bread"],
                         ["expense", "Expenses"],
                         ["reports", "Reports"],
                       ]
-                  ).map(([url, title], n) => (
-                    <Link key={url} to={"/" + url}>
-                      <span className="number">{n + 1}</span>
+                  ).map(([url, title]) => (
+                    <Link
+                      key={url}
+                      to={"/" + url}
+                      className={url === "sale" ? "primary-action" : undefined}
+                    >
+                      <svg
+                        className="action-icon"
+                        viewBox="0 0 24 24"
+                        aria-hidden="true"
+                        focusable="false"
+                      >
+                        <path d={actionIconPaths[url]} />
+                      </svg>
                       {title}
                       <span aria-hidden="true">›</span>
                     </Link>
@@ -768,7 +803,23 @@ function RecordForm({
             (e) => e.event_type === "sale" && e.user_id === identity.user_id,
           )?.payload.unit_price ?? "",
     ),
-    [quantity, setQuantity] = useState(0);
+    [quantity, setQuantity] = useState(0),
+    [manualAmount, setManualAmount] = useState(""),
+    [paidInFull, setPaidInFull] = useState(false),
+    [paymentMethod, setPaymentMethod] = useState("cash"),
+    [paymentSaleId, setPaymentSaleId] = useState("");
+  const saleTotal = quantity * Number(unitPrice);
+  const validFullAmount =
+    Number.isInteger(saleTotal) && saleTotal > 0 && saleTotal <= 1000000000;
+  const amountReceived =
+    paymentMethod === "credit"
+      ? "0"
+      : paidInFull
+        ? validFullAmount
+          ? String(saleTotal)
+          : ""
+        : manualAmount;
+  const saleBalance = Math.max(0, saleTotal - Number(amountReceived));
   const [formError, setFormError] = useState("");
   const reversed = new Set(
     records
@@ -787,9 +838,16 @@ function RecordForm({
           r.event_type === "receipt" && r.payload.transfer_id === e.entity_id,
       ),
   );
-  const sales = records.filter(
-    (e) => e.event_type === "sale" && !reversed.has(e.event_id),
-  );
+  const outstandingSales =
+    type === "payment"
+      ? Object.entries(report(records).sales).filter(
+          ([, sale]) => sale.paid < sale.total,
+        )
+      : [];
+  const paymentSale = outstandingSales.find(
+    ([id]) => id === paymentSaleId,
+  )?.[1];
+  const paymentBalance = paymentSale ? paymentSale.total - paymentSale.paid : 0;
   const number = (
     name: string,
     label: string,
@@ -830,6 +888,8 @@ function RecordForm({
     setBusy(true);
     setFormError("");
     try {
+      if (type === "sale" && paidInFull && !validFullAmount)
+        throw new Error("Enter a valid sale total to use full payment.");
       const p: Record<string, any> = {};
       for (const [k, v] of f.entries()) p[k] = v;
       for (const k of ["quantity", "unit_price", "amount_received", "amount"])
@@ -969,18 +1029,53 @@ function RecordForm({
               onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
                 setUnitPrice(Number(e.target.value)),
             })}
-            <output className="summary">
-              Total: {ugx(quantity * Number(unitPrice))}
-            </output>
-            {number("amount_received", "Money received now (UGX)")}
+            <div className="checkout-summary">
+              <div>
+                <span>Sale total</span>
+                <strong>{ugx(saleTotal)}</strong>
+              </div>
+              <div>
+                <span>Balance due</span>
+                <strong>{ugx(saleBalance)}</strong>
+              </div>
+            </div>
             <label>
               Payment method
-              <select name="method">
+              <select
+                name="method"
+                value={paymentMethod}
+                onChange={(event) => {
+                  setPaymentMethod(event.target.value);
+                  if (event.target.value === "credit") {
+                    setPaidInFull(false);
+                    setManualAmount("0");
+                  }
+                }}
+              >
                 <option value="cash">Cash</option>
                 <option value="mobile_money">Mobile money</option>
                 <option value="credit">Credit — no payment yet</option>
               </select>
             </label>
+            <label className="check-option">
+              <input
+                type="checkbox"
+                checked={paidInFull}
+                disabled={
+                  paymentMethod === "credit" ||
+                  (!validFullAmount && !paidInFull)
+                }
+                onChange={(event) => setPaidInFull(event.target.checked)}
+              />
+              Use full sale total
+            </label>
+            {number("amount_received", "Money received now (UGX)", 0, {
+              value: amountReceived,
+              readOnly: paymentMethod === "credit" || paidInFull,
+              max: Math.min(saleTotal, 1000000000),
+              onChange: (event: React.ChangeEvent<HTMLInputElement>) =>
+                setManualAmount(event.target.value),
+            })}
             <label>
               Sale type
               <select name="kind">
@@ -990,7 +1085,11 @@ function RecordForm({
             </label>
             <label>
               Customer (required for unpaid bread)
-              <input name="customer" maxLength={120} />
+              <input
+                name="customer"
+                maxLength={120}
+                required={saleBalance > 0}
+              />
             </label>
           </>
         )}
@@ -998,18 +1097,30 @@ function RecordForm({
           <>
             <label>
               Sale
-              <select name="sale_id" required>
-                <option value="">Choose a sale</option>
-                {sales.map((s) => (
-                  <option key={s.entity_id} value={s.entity_id}>
-                    {s.payload.customer || "Customer"} ·{" "}
-                    {s.entity_id.slice(0, 8)} ·{" "}
-                    {ugx(s.payload.quantity * s.payload.unit_price)}
+              <select
+                name="sale_id"
+                required
+                value={paymentSaleId}
+                onChange={(event) => setPaymentSaleId(event.target.value)}
+              >
+                <option value="">Choose an unpaid sale</option>
+                {outstandingSales.map(([id, sale]) => (
+                  <option key={id} value={id}>
+                    {sale.customer || "Customer"} · {id.slice(0, 8)} ·{" "}
+                    {ugx(sale.total - sale.paid)} due
                   </option>
                 ))}
               </select>
             </label>
-            {number("amount", "Money received (UGX)", 1)}
+            {paymentSale && (
+              <p>Balance due on this phone: {ugx(paymentBalance)}</p>
+            )}
+            {!outstandingSales.length && <p>No unpaid sales on this phone.</p>}
+            {number("amount", "Money received (UGX)", 1, {
+              key: paymentSaleId,
+              disabled: !paymentSale,
+              max: paymentBalance,
+            })}
             <label>
               Payment method
               <select name="method">

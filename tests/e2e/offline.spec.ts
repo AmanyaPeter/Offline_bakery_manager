@@ -48,7 +48,7 @@ test("installed shell saves bread offline and survives a reload", async ({
     fullPage: true,
   });
   await context.setOffline(true);
-  await page.getByRole("link", { name: "1 Baked Bread" }).click();
+  await page.getByRole("link", { name: "Baked Bread" }).click();
   await page.getByLabel("Number of loaves").fill("200");
   await page.getByRole("button", { name: "Save record", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Saved on this phone");
@@ -56,15 +56,30 @@ test("installed shell saves bread offline and survives a reload", async ({
   await page.reload();
   await expect(page.getByText("200 loaves", { exact: false })).toBeVisible();
   await expect(page.getByText("1 waiting for backup")).toBeVisible();
-  await page.getByRole("link", { name: "5 Sold Bread" }).click();
+  await page.getByRole("link", { name: "Sold Bread" }).click();
   await page.getByLabel("Loaves sold").fill("20");
   await page.getByLabel("Price of one loaf (UGX)").fill("2000");
-  await page.getByLabel("Money received now (UGX)").fill("10000");
+  const amount = page.getByLabel("Money received now (UGX)");
+  const fullPayment = page.getByRole("checkbox", {
+    name: "Use full sale total",
+  });
+  await fullPayment.check();
+  await expect(amount).toHaveValue("40000");
+  await page.getByLabel("Loaves sold").fill("21");
+  await expect(amount).toHaveValue("42000");
+  await page.getByLabel("Loaves sold").fill("20");
+  await page.getByLabel("Payment method").selectOption("credit");
+  await expect(amount).toHaveValue("0");
+  await expect(fullPayment).not.toBeChecked();
+  await expect(fullPayment).toBeDisabled();
+  await expect(amount).not.toBeEditable();
+  await page.getByLabel("Payment method").selectOption("cash");
+  await amount.fill("10000");
   await page.getByLabel("Customer (required for unpaid bread)").fill("Grace");
   await page.getByRole("button", { name: "Save record", exact: true }).click();
   await expect(page.getByText("2 waiting for backup")).toBeVisible();
   await expect(page.getByText("180 loaves", { exact: false })).toBeVisible();
-  await page.getByRole("link", { name: "7 Reports" }).click();
+  await page.getByRole("link", { name: "Reports" }).click();
   await expect(
     page.locator("dl div").filter({ hasText: "Customer credit outstanding" }),
   ).toContainText("UGX 30,000");
@@ -72,7 +87,7 @@ test("installed shell saves bread offline and survives a reload", async ({
     page.locator("dl div").filter({ hasText: "Money collected" }),
   ).toContainText("UGX 10,000");
   await page.getByRole("link", { name: "Home", exact: true }).click();
-  await page.getByRole("link", { name: "3 Bought Ingredients" }).click();
+  await page.getByRole("link", { name: "Bought Ingredients" }).click();
   await page
     .getByRole("combobox", { name: "Ingredient", exact: true })
     .selectOption("44444444-4444-4444-8444-444444444444");
@@ -84,6 +99,16 @@ test("installed shell saves bread offline and survives a reload", async ({
     .getByRole("link", { name: "Records, payments & corrections" })
     .click();
   await expect(page.getByText(/Flour: 1.5 kg/)).toBeVisible();
+  await page.getByRole("link", { name: "Receive Payment" }).click();
+  const sale = page.getByRole("combobox", { name: "Sale", exact: true });
+  await expect(sale.getByRole("option").nth(1)).toHaveText(
+    /Grace.*UGX 30,000 due/,
+  );
+  await sale.selectOption({ index: 1 });
+  await expect(page.getByLabel("Money received (UGX)")).toHaveAttribute(
+    "max",
+    "30000",
+  );
 });
 test("seller home keeps the requested action order", async ({ page }) => {
   await page.goto("/");
@@ -105,10 +130,10 @@ test("seller home keeps the requested action order", async ({ page }) => {
   );
   await page.reload();
   await expect(page.locator("nav.actions a")).toHaveText([
-    "1Sold Bread›",
-    "2Received Bread›",
-    "3Bread Left›",
-    "4Return Bread›",
-    "5My Records›",
+    "Sold Bread›",
+    "Received Bread›",
+    "Bread Left›",
+    "Return Bread›",
+    "My Records›",
   ]);
 });
