@@ -468,3 +468,50 @@ it("converts familiar ingredient quantities to exact scaled integers", () => {
   expect(() => parseQuantity("1.5", 1)).toThrow("finely");
   expect(() => parseQuantity("1.0001", 1000)).toThrow("finely");
 });
+
+it("costs a bake from weighted-average ingredients and direct costs", async () => {
+  const d = phone();
+  const ingredient_id = ids();
+  await d.save(
+    manager,
+    "purchase",
+    {
+      items: [{ ingredient_id, quantity: 10000, cost: 20000 }],
+    },
+    "2026-11-22T04:00:00Z",
+  );
+  const bake = await d.save(
+    manager,
+    "production",
+    {
+      quantity: 100,
+      inputs: [{ ingredient_id, quantity: 5000 }],
+      baking_cost: 2500,
+    },
+    "2026-11-22T05:00:00Z",
+  );
+  const totals = report(await d.visible(manager));
+  expect(totals.batchCosts[bake.event_id]).toEqual({
+    total: 12500,
+    perLoaf: 125,
+  });
+  expect(totals.ingredients[ingredient_id]).toEqual({
+    quantity: 5000,
+    value: 10000,
+  });
+  expect(totals.expenses).toBe(2500);
+  expect(totals.estimatedUse).toBe(10000);
+
+  const secondBake = await d.save(
+    manager,
+    "production",
+    {
+      quantity: 100,
+      inputs: [{ ingredient_id, quantity: 6000 }],
+    },
+    "2026-11-22T06:00:00Z",
+  );
+  expect(
+    report(await d.visible(manager)).batchCosts[secondBake.event_id],
+  ).toBeNull();
+});

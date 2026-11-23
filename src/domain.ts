@@ -5,7 +5,22 @@ const id = z.string().uuid(),
   note = z.string().max(500).default("");
 const base = { notes: note };
 export const payloads = {
-  production: z.object({ ...base, quantity: qty }),
+  production: z.object({
+    ...base,
+    quantity: qty,
+    inputs: z
+      .array(z.object({ ingredient_id: id, quantity: qty }))
+      .min(1)
+      .max(30)
+      .refine(
+        (items) =>
+          new Set(items.map((item) => item.ingredient_id)).size ===
+          items.length,
+        "Enter each ingredient once.",
+      )
+      .optional(),
+    baking_cost: money.optional(),
+  }),
   transfer: z.object({ ...base, destination: id, quantity: qty }),
   receipt: z.object({
     ...base,
@@ -218,6 +233,8 @@ export function report(events: BusinessEvent[]) {
       {},
     transfers: Record<string, any> = {},
     ingredients: Record<string, { quantity: number; value: number }> = {};
+  const batchCosts: Record<string, { total: number; perLoaf: number } | null> =
+    {};
   let revenue = 0,
     cash = 0,
     purchases = 0,
@@ -232,10 +249,37 @@ export function report(events: BusinessEvent[]) {
   for (const e of active) {
     const p = e.payload;
     switch (e.event_type) {
-      case "production":
+      case "production": {
         move(e.location_id, p.quantity);
         produced += p.quantity;
+        let inputCost = 0;
+        let fullyPriced = !!p.inputs?.length;
+        for (const input of p.inputs || []) {
+          const balance = ingredients[input.ingredient_id] || {
+            quantity: 0,
+            value: 0,
+          };
+          const available = Math.max(0, balance.quantity);
+          const cost = prorate(
+            balance.value,
+            Math.min(input.quantity, available),
+            available,
+          );
+          if (input.quantity > available || balance.value === 0)
+            fullyPriced = false;
+          inputCost += cost;
+          balance.quantity -= input.quantity;
+          balance.value -= cost;
+          ingredients[input.ingredient_id] = balance;
+        }
+        estimatedUse += inputCost;
+        expenses += p.baking_cost || 0;
+        const total = inputCost + (p.baking_cost || 0);
+        batchCosts[e.event_id] = fullyPriced
+          ? { total, perLoaf: prorate(total, 1, p.quantity) }
+          : null;
         break;
+      }
       case "transfer":
       case "return":
         move(e.location_id, -p.quantity);
@@ -398,6 +442,7 @@ export function report(events: BusinessEvent[]) {
     0,
   );
   return {
+    batchCosts,
     allocated,
     inTransit,
     sold,

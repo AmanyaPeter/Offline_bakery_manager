@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import {
   BrowserRouter,
   Link,
+  NavLink,
   useNavigate,
   useLocation,
 } from "react-router-dom";
@@ -25,7 +26,7 @@ import {
 import "./style.css";
 const sync = new Synchronizer(db, transport);
 const titles: Record<EventType, string> = {
-  production: "Baked Bread",
+  production: "Record Bake",
   transfer: "Give Bread to Seller",
   receipt: "Received Bread",
   return: "Return Bread",
@@ -54,7 +55,31 @@ const actionIconPaths: Record<string, string> = {
   ingredient_count: "M9 4H5v17h14V4h-4m-6-1h6v4H9zm-1 11 3 3 5-6",
   expense: "M5 4h14v16l-3-2-4 2-4-2-3 2zm4 5h6m-6 4h6",
   reports: "M4 4v16h16m-12-4v-4m5 4V8m5 8V5",
+  home: "M4 4h6v6H4zm10 0h6v6h-6zM4 14h6v6H4zm10 0h6v6h-6z",
+  backup: "M12 3 4.5 6v5c0 5 3 8 7.5 10 4.5-2 7.5-5 7.5-10V6zM9 12l2 2 4-4",
+  account:
+    "M16 8a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM4 21v-2a5 5 0 0 1 5-5h6a5 5 0 0 1 5 5v2",
+  sync: "M20 7v5h-5M4 17v-5h5m-4-4a8 8 0 0 1 13-2l2 3M4 15l2 3a8 8 0 0 0 13-2",
 };
+
+function Icon({
+  name,
+  className = "icon",
+}: {
+  name: string;
+  className?: string;
+}) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 24 24"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <path d={actionIconPaths[name]} />
+    </svg>
+  );
+}
 
 function errorText(e: unknown) {
   if (e instanceof Error) {
@@ -231,6 +256,12 @@ function App() {
     setMessage("Recovery file downloaded. Keep it somewhere safe.");
   }
   const seller = identity?.role === "seller";
+  const latestBake =
+    !seller &&
+    activeFacts(records)
+      .reverse()
+      .find((event) => event.event_type === "production");
+  const latestBakeCost = latestBake && totals.batchCosts[latestBake.event_id];
   if (!ready)
     return (
       <main>
@@ -238,15 +269,41 @@ function App() {
       </main>
     );
   return (
-    <>
-      <header>
-        <div>
-          <small>BAKERY MANAGER</small>
-          <strong>{identity?.name || "Your bakery, together"}</strong>
-        </div>
-        {identity && <Link to="/home">Home</Link>}
+    <div className={identity ? "pos-shell" : "guest-shell"}>
+      <header className="pos-header">
+        <Link className="brand" to={identity ? "/home" : "/account"}>
+          <Icon name="production" className="brand-icon" />
+          <span>
+            <strong>Bakery Manager</strong>
+            {identity?.name && <small>{identity.name}</small>}
+          </span>
+        </Link>
       </header>
-      <main>
+      {identity && (
+        <nav className="pos-navigation" aria-label="Main navigation">
+          <Link
+            to="/home"
+            className={path === "home" ? "active" : undefined}
+            aria-current={path === "home" ? "page" : undefined}
+          >
+            <Icon name="home" />
+            Register
+          </Link>
+          <NavLink to="/records">
+            <Icon name="records" />
+            Records
+          </NavLink>
+          <NavLink to="/backup">
+            <Icon name="backup" />
+            Backup
+          </NavLink>
+          <NavLink to="/account">
+            <Icon name="account" />
+            Account
+          </NavLink>
+        </nav>
+      )}
+      <main className={path === "home" && identity ? "pos-home" : "pos-page"}>
         {identity && (
           <aside
             className={
@@ -254,24 +311,26 @@ function App() {
             }
             aria-live="polite"
           >
-            <strong>
-              {online ? "Online" : "Offline — you can keep working"}
-            </strong>
-            <span>
-              {pending.length} waiting for backup · {rejected.length} need
-              attention
-            </span>
-            {!pending.length && !rejected.length && (
-              <span>All recorded transactions backed up</span>
-            )}
-            {!authenticated && (
-              <Link to="/account">Sign in to back up this phone</Link>
-            )}
+            <div className="status-details">
+              <strong>
+                <span className={online ? "online-dot" : "offline-dot"} />
+                {online ? "Online" : "Offline — you can keep working"}
+              </strong>
+              <span>
+                {pending.length || rejected.length
+                  ? `${pending.length} waiting for backup · ${rejected.length} need attention`
+                  : "All recorded transactions backed up"}
+              </span>
+              {!authenticated && (
+                <Link to="/account">Sign in to back up this phone</Link>
+              )}
+            </div>
             <button
-              className="secondary"
+              className="secondary sync-button"
               disabled={syncing || !authenticated || !online}
               onClick={() => void runSync(true)}
             >
+              <Icon name="sync" />
               {syncing ? "Backing up…" : "Sync now"}
             </button>
           </aside>
@@ -306,10 +365,16 @@ function App() {
           <>
             {path === "home" && (
               <>
-                <h1>What would you like to record?</h1>
+                <h1>
+                  {seller
+                    ? "What would you like to record?"
+                    : "Bakery production"}
+                </h1>
                 <section className="workbench" aria-label="Bakery balances">
                   <div className="stock-card">
-                    <span>Bread at your location</span>
+                    <span>
+                      <Icon name="production" /> Bread at your location
+                    </span>
                     <strong>
                       {totals.stock[identity.location_id] || 0}{" "}
                       <small>loaves</small>
@@ -317,17 +382,33 @@ function App() {
                     <Link to="/balance">View bread stock</Link>
                   </div>
                   <dl className="money-card">
+                    {!seller && (
+                      <div>
+                        <dt>
+                          <Icon name="production" /> Latest bake cost per loaf
+                        </dt>
+                        <dd>
+                          {latestBakeCost
+                            ? ugx(latestBakeCost.perLoaf)
+                            : "Unavailable"}
+                        </dd>
+                      </div>
+                    )}
                     <div>
-                      <dt>Money collected</dt>
+                      <dt>
+                        <Icon name="sale" /> Money collected
+                      </dt>
                       <dd>{ugx(totals.cash)}</dd>
                     </div>
                     <div>
-                      <dt>Customer credit outstanding</dt>
+                      <dt>
+                        <Icon name="balance" /> Customer credit outstanding
+                      </dt>
                       <dd>{ugx(totals.debt)}</dd>
                     </div>
                   </dl>
                 </section>
-                <nav className="actions">
+                <nav className="actions" aria-label="Bakery actions">
                   {(seller
                     ? [
                         ["sale", "Sold Bread"],
@@ -337,8 +418,8 @@ function App() {
                         ["records", "My Records"],
                       ]
                     : [
+                        ["production", titles.production],
                         ["sale", "Sold Bread"],
-                        ["production", "Baked Bread"],
                         ["transfer", "Give Bread to Seller"],
                         ["purchase", "Bought Ingredients"],
                         ["ingredient_count", "Count Ingredients Left"],
@@ -349,16 +430,13 @@ function App() {
                     <Link
                       key={url}
                       to={"/" + url}
-                      className={url === "sale" ? "primary-action" : undefined}
+                      className={
+                        url === (seller ? "sale" : "production")
+                          ? "primary-action"
+                          : undefined
+                      }
                     >
-                      <svg
-                        className="action-icon"
-                        viewBox="0 0 24 24"
-                        aria-hidden="true"
-                        focusable="false"
-                      >
-                        <path d={actionIconPaths[url]} />
-                      </svg>
+                      <Icon name={url} className="action-icon" />
                       {title}
                       <span aria-hidden="true">›</span>
                     </Link>
@@ -369,20 +447,11 @@ function App() {
                     Confirm returned bread
                   </Link>
                 )}
-                <Link className="block" to="/records">
-                  Records, payments & corrections
-                </Link>
-                <Link className="block" to="/backup">
-                  Backup & phone safety
-                </Link>
                 {identity.role === "owner" && (
                   <Link className="block" to="/admin">
                     Owner administration
                   </Link>
                 )}
-                <Link className="block" to="/account">
-                  Account
-                </Link>
               </>
             )}
             {path in titles && (
@@ -486,6 +555,39 @@ function App() {
                         : ""}
                       {e.payload.amount ? ugx(e.payload.amount) : ""}
                     </p>
+                    {e.event_type === "production" && (
+                      <>
+                        <p>
+                          {totals.batchCosts[e.event_id]
+                            ? `Estimated batch cost ${ugx(totals.batchCosts[e.event_id]!.total)} · ${ugx(totals.batchCosts[e.event_id]!.perLoaf)} per loaf`
+                            : "Batch cost unavailable. Check ingredient quantities and purchase history."}
+                        </p>
+                        <ul>
+                          {e.payload.inputs?.map(
+                            (item: {
+                              ingredient_id: string;
+                              quantity: number;
+                            }) => {
+                              const config = ingredients.find(
+                                (i) => i.id === item.ingredient_id,
+                              );
+                              return (
+                                <li key={item.ingredient_id}>
+                                  {config?.name || "Ingredient"}:{" "}
+                                  {item.quantity / (config?.scale || 1)}{" "}
+                                  {config?.unit}
+                                </li>
+                              );
+                            },
+                          )}
+                          {e.payload.baking_cost > 0 && (
+                            <li>
+                              Other baking costs: {ugx(e.payload.baking_cost)}
+                            </li>
+                          )}
+                        </ul>
+                      </>
+                    )}
                     {e.event_type === "purchase" && (
                       <ul>
                         {e.payload.items.map((item: any, n: number) => {
@@ -596,7 +698,7 @@ function App() {
         )}
       </main>
       <footer>Bakery Manager · UGX · Africa/Kampala</footer>
-    </>
+    </div>
   );
 }
 function Account({
@@ -868,10 +970,10 @@ function RecordForm({
       />
     </label>
   );
-  const ingredient = (name = "ingredient_id") => (
+  const ingredient = (name = "ingredient_id", required = true) => (
     <label>
       Ingredient
-      <select name={name} required>
+      <select name={name} required={required}>
         <option value="">Choose an ingredient</option>
         {ingredients.map((i) => (
           <option key={i.id} value={i.id}>
@@ -899,6 +1001,21 @@ function RecordForm({
         if (!config) throw new Error("Choose an ingredient first.");
         return parseQuantity(String(f.get(field)), config.scale);
       };
+      if (type === "production") {
+        const inputs = [];
+        for (let n = 0; n < lines; n++) {
+          const ingredient_id = String(f.get("ingredient_" + n) || "");
+          const rawQuantity = f.get("quantity_" + n);
+          if (!ingredient_id && !rawQuantity) continue;
+          inputs.push({
+            ingredient_id,
+            quantity: measured("quantity_" + n, ingredient_id),
+          });
+        }
+        if (inputs.length) p.inputs = inputs;
+        if (p.baking_cost) p.baking_cost = Number(p.baking_cost);
+        else delete p.baking_cost;
+      }
       if (type === "purchase")
         p.items = Array.from({ length: lines }, (_, n) => {
           const ingredient_id = String(f.get("ingredient_" + n));
@@ -944,7 +1061,7 @@ function RecordForm({
           {formError}
         </p>
       )}
-      <form onSubmit={submit}>
+      <form className="transaction-form" onSubmit={submit}>
         {[
           "production",
           "transfer",
@@ -967,6 +1084,49 @@ function RecordForm({
                 ? 0
                 : 1,
           )}
+        {type === "production" && (
+          <fieldset>
+            <legend>What went into this bake</legend>
+            <p className="hint">
+              Enter the ingredients actually used. Record ingredient purchases
+              so the app can estimate their cost.
+            </p>
+            {Array.from({ length: lines }, (_, n) => (
+              <div key={n}>
+                {ingredient("ingredient_" + n, false)}
+                {number(
+                  "quantity_" + n,
+                  "Quantity used in the ingredient’s unit",
+                  0,
+                  {
+                    step: "any",
+                    inputMode: "decimal",
+                    required: false,
+                  },
+                )}
+              </div>
+            ))}
+            {lines < 30 && (
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => setLines(lines + 1)}
+              >
+                Add ingredient
+              </button>
+            )}
+            {number(
+              "baking_cost",
+              "Other costs for this bake (UGX, optional)",
+              0,
+              { required: false },
+            )}
+            <p className="hint">
+              Include costs such as fuel or paid labor here if you can attribute
+              them to this bake. Enter each cost once.
+            </p>
+          </fieldset>
+        )}
         {type === "bread_adjustment" && (
           <label>
             Stock location
@@ -1351,8 +1511,8 @@ function Reports({
     <>
       <h1>Reports</h1>
       <p>
-        Includes local records waiting for backup. Rejected records are
-        excluded. Estimates depend on classified stock differences.
+        Includes local records waiting for backup. Ingredient costs use recorded
+        bake inputs and classified stock differences.
       </p>
       <dl>
         {items.map(([k, v]) => (
@@ -1423,7 +1583,7 @@ function Reports({
         </dl>
       ) : (
         <p>
-          Cost of bread sold and profit estimates need classified production use
+          Cost of bread sold and profit estimates need costed ingredient use
           and enough recorded production first.
         </p>
       )}
@@ -1431,7 +1591,7 @@ function Reports({
         Estimates spread all classified ingredient production costs equally
         across all recorded production. Net profit also subtracts operating
         expenses and the estimated ingredient cost of damaged bread. These are
-        cumulative estimates, not exact batch costs.
+        cumulative estimates. Open Records to view individual bake costs.
       </p>
       <h2>Review differences</h2>
       {t.discrepancies.length ? (

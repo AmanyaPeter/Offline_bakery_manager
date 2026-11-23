@@ -41,14 +41,14 @@ test("installed shell saves bread offline and survives a reload", async ({
   }, identity);
   await page.reload();
   await expect(
-    page.getByRole("heading", { name: "What would you like to record?" }),
+    page.getByRole("heading", { name: "Bakery production" }),
   ).toBeVisible();
   await page.screenshot({
     path: "test-results/mobile-home.png",
     fullPage: true,
   });
   await context.setOffline(true);
-  await page.getByRole("link", { name: "Baked Bread" }).click();
+  await page.getByRole("link", { name: "Record Bake" }).click();
   await page.getByLabel("Number of loaves").fill("200");
   await page.getByRole("button", { name: "Save record", exact: true }).click();
   await expect(page.getByRole("status")).toContainText("Saved on this phone");
@@ -96,7 +96,8 @@ test("installed shell saves bread offline and survives a reload", async ({
   await page.getByRole("button", { name: "Save record", exact: true }).click();
   await expect(page.getByText("3 waiting for backup")).toBeVisible();
   await page
-    .getByRole("link", { name: "Records, payments & corrections" })
+    .getByRole("navigation", { name: "Main navigation" })
+    .getByRole("link", { name: "Records", exact: true })
     .click();
   await expect(page.getByText(/Flour: 1.5 kg/)).toBeVisible();
   await page.getByRole("link", { name: "Receive Payment" }).click();

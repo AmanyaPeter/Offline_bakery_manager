@@ -17,6 +17,8 @@ All amounts are whole UGX. A sale is at most UGX 1,000,000,000. No floating-poin
 
 Purchases are inventory investment, separate from operating expenses. Each purchase can contain several ingredients. Purchase paid amounts contribute to ingredient inventory value; quantities contribute to stock. Weighted-average carrying value follows purchases and classified adjustments ordered by effective time, with deterministic event tie breaking. Late facts can change estimates; resynchronize before relying on reports.
 
+Record loaves and the actual ingredient quantities together in **Record Bake**. The bake deducts those quantities from stock and values them at the weighted-average cost at the time of the bake. Its estimate includes any fuel, labor, or other costs entered for that bake, and the cost per loaf divides that total by the loaves produced. A bake with insufficient priced stock or missing ingredient inputs has no batch estimate. Enter direct costs only once because those costs already contribute to total expenses.
+
 A count does not silently consume stock. Review:
 
 `previous balance + purchases + incoming adjustments - current count - known outflows`.
@@ -27,12 +29,12 @@ Classify differences as estimated production use, wastage, spoilage, measurement
 
 The default all-records report uses a uniform ingredient cost estimate for the single bread product:
 
-- Estimated production ingredient cost = classified production use at ingredient weighted average.
+- Estimated production ingredient cost = recorded bake inputs plus classified production use at ingredient weighted average.
 - Estimated cost of bread sold = production ingredient cost × sold loaves / produced loaves.
 - Estimated gross profit = sales revenue minus estimated ingredient cost of sold bread.
 - Estimated net profit = estimated gross profit minus operating expenses minus estimated ingredient cost of damaged bread.
 - Revenue minus all classified production use minus expenses is separately labeled a production-period margin, not interchangeable with cost-of-sales profit.
 
-These estimates are shown only when production and classified ingredient costs exist and sold plus damaged bread does not exceed produced bread. They spread cumulative costs over cumulative production, not individual batches. They exclude unclassified ingredient losses and unpriced opening stock. Fuel, wages and other entered operating costs are expensed once and are not allocated to bread inventory. This is deliberately a simple management estimate, not financial statements or exact production costing. Unsold bread remains visible by location; in-transit bread is not part of a location balance until confirmed.
+These estimates are shown only when production and classified ingredient costs exist and sold plus damaged bread does not exceed produced bread. The cost-of-sales estimates spread cumulative ingredient costs over all recorded production. The batch estimate in Records uses only the inputs and direct costs for that bake. They exclude unclassified ingredient losses and unpriced opening stock. Fuel, wages and other entered operating costs are expensed once for the profit report. This is deliberately a simple management estimate, not financial statements or exact production costing. Unsold bread remains visible by location; in-transit bread is not part of a location balance until confirmed.
 
 Before using profitability, enter opening inventory through purchases/production or reviewed adjustments, classify stock differences, resolve rejected records and synchronize every phone. Do not claim exact per-batch consumption from a count spanning several batches.
